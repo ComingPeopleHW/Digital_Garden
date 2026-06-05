@@ -54,6 +54,26 @@ docker compose up -d postgres
 
 The backend expects `DATABASE_URL` to point at a running PostgreSQL instance. On startup it applies the embedded schema and seed data automatically.
 
+## Production Deployment
+
+For an Ubuntu server with Docker installed:
+
+```bash
+git clone https://github.com/ComingPeopleHW/Digital_Garden.git
+cd Digital_Garden
+cp .env.production.example .env
+# edit .env and set POSTGRES_PASSWORD plus FRONTEND_ORIGIN=http://YOUR_SERVER_IP
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+The production stack includes:
+
+- Caddy serving the React build on port 80
+- Go backend behind `/api/*`
+- PostgreSQL with a persistent Docker volume
+
+For IP-only access, Caddy serves plain HTTP. When a domain is available, update `deploy/Caddyfile` from `:80` to the domain name and set `FRONTEND_ORIGIN=https://your-domain`.
+
 ## Initial MVP
 
 - Public feed across users
