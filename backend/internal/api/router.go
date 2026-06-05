@@ -27,6 +27,7 @@ type ContentStore interface {
 	CreateSession(ctx context.Context, token string, userID string) error
 	UserBySessionToken(ctx context.Context, token string) (garden.User, error)
 	DeleteSession(ctx context.Context, token string) error
+	UpdateUserProfile(ctx context.Context, input garden.UpdateUserProfileInput) (garden.User, error)
 	CreatePost(ctx context.Context, input garden.CreatePostInput) (garden.Post, error)
 	ReactToPost(ctx context.Context, postID string, userKey string, reaction garden.ReactionType) (garden.Post, error)
 }
@@ -50,6 +51,7 @@ func NewRouter(frontendOrigin string, store ContentStore) http.Handler {
 		r.Post("/auth/register", register(store))
 		r.Post("/auth/login", login(store))
 		r.Post("/auth/logout", logout(store))
+		r.Patch("/me/profile", updateProfile(store))
 		r.Get("/users", listUsers(store))
 		r.Get("/users/{username}", getUser(store))
 		r.Get("/users/{username}/posts", listUserPosts(store))
@@ -187,6 +189,50 @@ func logout(store ContentStore) http.HandlerFunc {
 		}
 		clearSessionCookie(w)
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func updateProfile(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, err := requireUser(r.Context(), r, store)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "login required")
+			return
+		}
+
+		var payload struct {
+			Name      string `json:"name"`
+			Bio       string `json:"bio"`
+			AvatarURL string `json:"avatarUrl"`
+			Location  string `json:"location"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		payload.Name = strings.TrimSpace(payload.Name)
+		payload.Bio = strings.TrimSpace(payload.Bio)
+		payload.AvatarURL = strings.TrimSpace(payload.AvatarURL)
+		payload.Location = strings.TrimSpace(payload.Location)
+		if payload.Name == "" {
+			writeError(w, http.StatusBadRequest, "name is required")
+			return
+		}
+
+		updatedUser, err := store.UpdateUserProfile(r.Context(), garden.UpdateUserProfileInput{
+			UserID:    user.ID,
+			Name:      payload.Name,
+			Bio:       payload.Bio,
+			AvatarURL: payload.AvatarURL,
+			Location:  payload.Location,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update profile")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]garden.User{"user": updatedUser})
 	}
 }
 

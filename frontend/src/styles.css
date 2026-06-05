@@ -135,13 +135,16 @@ h3 {
 }
 
 .authPanel,
-.composeForm {
+.composeForm,
+.profileForm,
+.signedInPanel {
   display: grid;
   gap: 12px;
 }
 
 .authPanel button,
 .composeForm button,
+.profileForm button,
 .reactionBar button {
   display: inline-flex;
   align-items: center;
@@ -156,7 +159,8 @@ h3 {
 }
 
 .authPanel button,
-.composeForm button {
+.composeForm button,
+.profileForm button {
   background: #f8f4ed;
   color: #1d2a22;
   font-weight: 720;
@@ -164,6 +168,7 @@ h3 {
 
 .authPanel button:hover,
 .composeForm button:hover,
+.profileForm button:hover,
 .reactionBar button:hover {
   transform: translateY(-1px);
 }
@@ -194,11 +199,34 @@ h3 {
   font-weight: 720;
 }
 
-.accountLine button {
+.accountIdentity {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  background: transparent;
+  color: #f8f4ed;
+  cursor: pointer;
+  font-weight: 720;
+}
+
+.accountActions {
+  display: flex;
+  gap: 8px;
+}
+
+.accountActions button {
   width: 40px;
   min-height: 40px;
+  border-radius: 8px;
   background: rgb(248 244 237 / 12%);
   color: #f8f4ed;
+  cursor: pointer;
+}
+
+.profileForm textarea {
+  min-height: 92px;
 }
 
 .notice {
@@ -214,12 +242,27 @@ h3 {
   border-top: 1px solid rgb(248 244 237 / 18%);
 }
 
-.profilePreview img,
-.postAuthor img {
+.avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #d8f26f;
+  color: #18201c;
+  font-weight: 780;
+  object-fit: cover;
+}
+
+.avatar-small {
   width: 48px;
   height: 48px;
-  border-radius: 50%;
-  object-fit: cover;
+  font-size: 0.92rem;
+}
+
+.avatar-large {
+  width: 96px;
+  height: 96px;
+  font-size: 1.6rem;
 }
 
 .profilePreview div {
@@ -316,13 +359,6 @@ h3 {
 .profileHeader.missing {
   display: block;
   color: #69736c;
-}
-
-.profileHeader > img {
-  width: 96px;
-  height: 96px;
-  border-radius: 50%;
-  object-fit: cover;
 }
 
 .profileMeta {
@@ -482,7 +518,7 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .profileHeader > img {
+  .avatar-large {
     width: 78px;
     height: 78px;
   }

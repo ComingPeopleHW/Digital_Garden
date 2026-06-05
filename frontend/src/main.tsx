@@ -1,6 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowDown, ArrowUp, Home, Leaf, LogOut, MapPin, PenLine, Send, Users } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Home,
+  Leaf,
+  LogOut,
+  MapPin,
+  PenLine,
+  Save,
+  Send,
+  Settings,
+  Users,
+} from "lucide-react";
 import "./styles.css";
 
 type User = {
@@ -44,6 +56,8 @@ function App() {
     password: "",
   });
   const [postForm, setPostForm] = useState({ title: "", body: "", imageUrl: "" });
+  const [profileForm, setProfileForm] = useState({ name: "", bio: "", avatarUrl: "", location: "" });
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -79,6 +93,21 @@ function App() {
       })
       .finally(() => setIsLoading(false));
   }, [profileUsername]);
+
+  useEffect(() => {
+    if (!me) {
+      setProfileForm({ name: "", bio: "", avatarUrl: "", location: "" });
+      setIsEditingProfile(false);
+      return;
+    }
+
+    setProfileForm({
+      name: me.name,
+      bio: me.bio,
+      avatarUrl: me.avatarUrl,
+      location: me.location,
+    });
+  }, [me]);
 
   const featuredUser = users[0];
   const totals = useMemo(() => {
@@ -167,6 +196,34 @@ function App() {
     setPostForm({ title: "", body: "", imageUrl: "" });
   }
 
+  async function submitProfile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setNotice("");
+    const response = await apiFetch("/api/me/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profileForm),
+    });
+    if (!response.ok) {
+      setNotice("资料保存失败");
+      return;
+    }
+
+    const session = (await response.json()) as { user: User };
+    applyUserUpdate(session.user);
+    setIsEditingProfile(false);
+    setNotice("资料已保存");
+  }
+
+  function applyUserUpdate(user: User) {
+    setMe(user);
+    setUsers((current) => current.map((item) => (item.id === user.id ? user : item)));
+    setProfileUser((current) => (current?.id === user.id ? user : current));
+    setPosts((current) =>
+      current.map((post) => (post.author.id === user.id ? { ...post, author: user } : post)),
+    );
+  }
+
   function navigateToProfile(username: string) {
     window.history.pushState({}, "", `/u/${encodeURIComponent(username)}`);
     setProfileUsername(username);
@@ -193,35 +250,84 @@ function App() {
             <h1>每个人都拥有一块可生长的公开空间</h1>
           </div>
           {me ? (
-            <form className="composeForm" onSubmit={submitPost}>
+            <div className="signedInPanel">
               <div className="accountLine">
-                <span>@{me.username}</span>
-                <button type="button" onClick={logout} aria-label="退出登录">
-                  <LogOut size={17} />
+                <button type="button" className="accountIdentity" onClick={() => navigateToProfile(me.username)}>
+                  <Avatar user={me} size="small" />
+                  <span>@{me.username}</span>
                 </button>
+                <div className="accountActions">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingProfile((current) => !current)}
+                    aria-label="编辑资料"
+                  >
+                    <Settings size={17} />
+                  </button>
+                  <button type="button" onClick={logout} aria-label="退出登录">
+                    <LogOut size={17} />
+                  </button>
+                </div>
               </div>
-              <input
-                value={postForm.title}
-                onChange={(event) => setPostForm((current) => ({ ...current, title: event.target.value }))}
-                placeholder="标题"
-                required
-              />
-              <textarea
-                value={postForm.body}
-                onChange={(event) => setPostForm((current) => ({ ...current, body: event.target.value }))}
-                placeholder="正文"
-                required
-              />
-              <input
-                value={postForm.imageUrl}
-                onChange={(event) => setPostForm((current) => ({ ...current, imageUrl: event.target.value }))}
-                placeholder="图片 URL"
-              />
-              <button type="submit">
-                <Send size={18} />
-                发布
-              </button>
-            </form>
+
+              {isEditingProfile ? (
+                <form className="profileForm" onSubmit={submitProfile}>
+                  <input
+                    value={profileForm.name}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="昵称"
+                    required
+                  />
+                  <textarea
+                    value={profileForm.bio}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, bio: event.target.value }))}
+                    placeholder="简介"
+                  />
+                  <input
+                    value={profileForm.avatarUrl}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({ ...current, avatarUrl: event.target.value }))
+                    }
+                    placeholder="头像 URL"
+                  />
+                  <input
+                    value={profileForm.location}
+                    onChange={(event) =>
+                      setProfileForm((current) => ({ ...current, location: event.target.value }))
+                    }
+                    placeholder="位置"
+                  />
+                  <button type="submit">
+                    <Save size={18} />
+                    保存资料
+                  </button>
+                </form>
+              ) : (
+                <form className="composeForm" onSubmit={submitPost}>
+                  <input
+                    value={postForm.title}
+                    onChange={(event) => setPostForm((current) => ({ ...current, title: event.target.value }))}
+                    placeholder="标题"
+                    required
+                  />
+                  <textarea
+                    value={postForm.body}
+                    onChange={(event) => setPostForm((current) => ({ ...current, body: event.target.value }))}
+                    placeholder="正文"
+                    required
+                  />
+                  <input
+                    value={postForm.imageUrl}
+                    onChange={(event) => setPostForm((current) => ({ ...current, imageUrl: event.target.value }))}
+                    placeholder="图片 URL"
+                  />
+                  <button type="submit">
+                    <Send size={18} />
+                    发布
+                  </button>
+                </form>
+              )}
+            </div>
           ) : (
             <form className="authPanel" onSubmit={submitAuth}>
               <div className="authTabs">
@@ -288,7 +394,7 @@ function App() {
 
         {featuredUser && (
           <section className="profilePreview">
-            <img src={featuredUser.avatarUrl} alt="" />
+            <Avatar user={featuredUser} size="small" />
             <div>
               <strong>{featuredUser.name}</strong>
               <span>@{featuredUser.username}</span>
@@ -368,7 +474,7 @@ function ProfileHeader({
 
   return (
     <section className="profileHeader">
-      <img src={user.avatarUrl} alt="" />
+      <Avatar user={user} size="large" />
       <div className="profileMeta">
         <div>
           <h3>{user.name}</h3>
@@ -401,7 +507,7 @@ function PostCard({
   return (
     <article className="postCard">
       <div className="postAuthor">
-        <img src={post.author.avatarUrl} alt="" />
+        <Avatar user={post.author} size="small" />
         <div>
           <button type="button" onClick={() => onAuthorClick(post.author.username)}>
             {post.author.name}
@@ -430,6 +536,23 @@ function PostCard({
       </div>
     </article>
   );
+}
+
+function Avatar({ user, size }: { user: User; size: "small" | "large" }) {
+  const className = `avatar avatar-${size}`;
+  if (user.avatarUrl) {
+    return <img className={className} src={user.avatarUrl} alt="" />;
+  }
+
+  return (
+    <span className={className} aria-hidden="true">
+      {initialsFor(user)}
+    </span>
+  );
+}
+
+function initialsFor(user: User) {
+  return (user.name || user.username).trim().slice(0, 2).toUpperCase();
 }
 
 function getProfileUsername() {

@@ -82,6 +82,7 @@ For IP-only access, Caddy serves plain HTTP. When a domain is available, update 
 - PostgreSQL-backed users, posts, media, and reactions
 - Upvote and downvote actions with one reaction per demo user
 - Email/username registration, login, logout, and session cookies
+- Logged-in profile editing for display name, bio, avatar URL, and location
 - Logged-in publishing for text and image URL posts
 - API skeleton ready for uploads
 
@@ -90,6 +91,7 @@ For IP-only access, Caddy serves plain HTTP. When a domain is available, update 
 ```http
 GET /healthz
 GET /api/me
+PATCH /api/me/profile
 POST /api/auth/register
 POST /api/auth/login
 POST /api/auth/logout

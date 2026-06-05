@@ -30,6 +30,14 @@ type CreateUserInput struct {
 	PasswordHash string
 }
 
+type UpdateUserProfileInput struct {
+	UserID    string
+	Name      string
+	Bio       string
+	AvatarURL string
+	Location  string
+}
+
 type CreatePostInput struct {
 	ID       string
 	AuthorID string

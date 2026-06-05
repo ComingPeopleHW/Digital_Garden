@@ -261,6 +261,33 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return nil
 }
 
+func (s *Store) UpdateUserProfile(ctx context.Context, input garden.UpdateUserProfileInput) (garden.User, error) {
+	var user garden.User
+	if err := s.db.QueryRowContext(ctx, `
+		UPDATE users
+		SET name = $2,
+			bio = $3,
+			avatar_url = $4,
+			location = $5
+		WHERE id = $1
+		RETURNING id, username, name, bio, avatar_url, location
+	`, input.UserID, input.Name, input.Bio, input.AvatarURL, input.Location).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Name,
+		&user.Bio,
+		&user.AvatarURL,
+		&user.Location,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return garden.User{}, ErrNotFound
+		}
+		return garden.User{}, fmt.Errorf("update user profile: %w", err)
+	}
+
+	return user, nil
+}
+
 func (s *Store) CreatePost(ctx context.Context, input garden.CreatePostInput) (garden.Post, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
