@@ -1,0 +1,27 @@
+.DS_Store
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Go
+backend/.cache/
+backend/bin/
+backend/tmp/
+backend/coverage.out
+
+# Node
+.pnpm-store/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors
+.idea/
+.vscode/
