@@ -20,6 +20,8 @@ import (
 type ContentStore interface {
 	ListUsers(ctx context.Context) ([]garden.User, error)
 	ListPosts(ctx context.Context) ([]garden.Post, error)
+	UserByUsername(ctx context.Context, username string) (garden.User, error)
+	ListPostsByUsername(ctx context.Context, username string) ([]garden.Post, error)
 	CreateUser(ctx context.Context, input garden.CreateUserInput) (garden.User, error)
 	FindUserForLogin(ctx context.Context, login string) (garden.User, string, error)
 	CreateSession(ctx context.Context, token string, userID string) error
@@ -49,6 +51,8 @@ func NewRouter(frontendOrigin string, store ContentStore) http.Handler {
 		r.Post("/auth/login", login(store))
 		r.Post("/auth/logout", logout(store))
 		r.Get("/users", listUsers(store))
+		r.Get("/users/{username}", getUser(store))
+		r.Get("/users/{username}/posts", listUserPosts(store))
 		r.Get("/posts", listPosts(store))
 		r.Post("/posts", createPost(store))
 		r.Post("/posts/{postID}/reactions", reactToPost(store))
@@ -197,11 +201,41 @@ func listUsers(store ContentStore) http.HandlerFunc {
 	}
 }
 
+func getUser(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, err := store.UserByUsername(r.Context(), chi.URLParam(r, "username"))
+		if err != nil {
+			if errors.Is(err, postgres.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to load user")
+			return
+		}
+		writeJSON(w, http.StatusOK, user)
+	}
+}
+
 func listPosts(store ContentStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		posts, err := store.ListPosts(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list posts")
+			return
+		}
+		writeJSON(w, http.StatusOK, posts)
+	}
+}
+
+func listUserPosts(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		posts, err := store.ListPostsByUsername(r.Context(), chi.URLParam(r, "username"))
+		if err != nil {
+			if errors.Is(err, postgres.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to list user posts")
 			return
 		}
 		writeJSON(w, http.StatusOK, posts)

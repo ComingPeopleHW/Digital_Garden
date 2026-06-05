@@ -94,6 +94,29 @@ func (s *Store) ListUsers(ctx context.Context) ([]garden.User, error) {
 	return users, nil
 }
 
+func (s *Store) UserByUsername(ctx context.Context, username string) (garden.User, error) {
+	var user garden.User
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT id, username, name, bio, avatar_url, location
+		FROM users
+		WHERE lower(username) = lower($1)
+	`, username).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Name,
+		&user.Bio,
+		&user.AvatarURL,
+		&user.Location,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return garden.User{}, ErrNotFound
+		}
+		return garden.User{}, fmt.Errorf("find user by username: %w", err)
+	}
+
+	return user, nil
+}
+
 func (s *Store) ListPosts(ctx context.Context) ([]garden.Post, error) {
 	rows, err := s.db.QueryContext(ctx, postSelectSQL+`
 		ORDER BY p.created_at DESC
@@ -113,6 +136,35 @@ func (s *Store) ListPosts(ctx context.Context) ([]garden.Post, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate posts: %w", err)
+	}
+
+	return posts, nil
+}
+
+func (s *Store) ListPostsByUsername(ctx context.Context, username string) ([]garden.Post, error) {
+	if _, err := s.UserByUsername(ctx, username); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx, postSelectSQL+`
+		HAVING lower(u.username) = lower($1)
+		ORDER BY p.created_at DESC
+	`, username)
+	if err != nil {
+		return nil, fmt.Errorf("list posts by username: %w", err)
+	}
+	defer rows.Close()
+
+	posts := make([]garden.Post, 0)
+	for rows.Next() {
+		post, err := scanPost(rows)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, post)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user posts: %w", err)
 	}
 
 	return posts, nil

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowDown, ArrowUp, Leaf, LogOut, MapPin, PenLine, Send, Users } from "lucide-react";
+import { ArrowDown, ArrowUp, Home, Leaf, LogOut, MapPin, PenLine, Send, Users } from "lucide-react";
 import "./styles.css";
 
 type User = {
@@ -32,6 +32,8 @@ function App() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [me, setMe] = useState<User | null>(null);
+  const [profileUser, setProfileUser] = useState<User | null>(null);
+  const [profileUsername, setProfileUsername] = useState(getProfileUsername());
   const [isLoading, setIsLoading] = useState(true);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authForm, setAuthForm] = useState({
@@ -45,18 +47,38 @@ function App() {
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
+    function handlePopState() {
+      setProfileUsername(getProfileUsername());
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    setIsLoading(true);
+    setNotice("");
+    const postsPath = profileUsername ? `/api/users/${encodeURIComponent(profileUsername)}/posts` : "/api/posts";
+    const profileRequest = profileUsername
+      ? apiFetch(`/api/users/${encodeURIComponent(profileUsername)}`).then((response) =>
+          response.ok ? response.json() : null,
+        )
+      : Promise.resolve(null);
+
     Promise.all([
-      apiFetch("/api/posts").then((response) => response.json()),
+      apiFetch(postsPath).then((response) => (response.ok ? response.json() : [])),
       apiFetch("/api/users").then((response) => response.json()),
       apiFetch("/api/me").then((response) => response.json()),
+      profileRequest,
     ])
-      .then(([nextPosts, nextUsers, session]) => {
+      .then(([nextPosts, nextUsers, session, nextProfileUser]) => {
         setPosts(nextPosts);
         setUsers(nextUsers);
         setMe(session.user);
+        setProfileUser(nextProfileUser);
       })
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [profileUsername]);
 
   const featuredUser = users[0];
   const totals = useMemo(() => {
@@ -137,8 +159,22 @@ function App() {
     }
 
     const post = (await response.json()) as Post;
-    setPosts((current) => [post, ...current]);
+    setPosts((current) =>
+      profileUsername && profileUsername.toLowerCase() !== post.author.username.toLowerCase()
+        ? current
+        : [post, ...current],
+    );
     setPostForm({ title: "", body: "", imageUrl: "" });
+  }
+
+  function navigateToProfile(username: string) {
+    window.history.pushState({}, "", `/u/${encodeURIComponent(username)}`);
+    setProfileUsername(username);
+  }
+
+  function navigateHome() {
+    window.history.pushState({}, "", "/");
+    setProfileUsername(null);
   }
 
   return (
@@ -258,6 +294,9 @@ function App() {
               <span>@{featuredUser.username}</span>
             </div>
             <p>{featuredUser.bio}</p>
+            <button type="button" onClick={() => navigateToProfile(featuredUser.username)}>
+              查看主页
+            </button>
           </section>
         )}
       </aside>
@@ -266,8 +305,14 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">Public Feed</p>
-            <h2>最新发布</h2>
+            <h2>{profileUser ? `${profileUser.name} 的主页` : "最新发布"}</h2>
           </div>
+          {profileUsername && (
+            <button className="homeButton" type="button" onClick={navigateHome} aria-label="回到全部内容">
+              <Home size={17} />
+              全部
+            </button>
+          )}
           <div className="stats">
             <span>
               <Users size={16} />
@@ -284,11 +329,19 @@ function App() {
           </div>
         </header>
 
+        {profileUsername && (
+          <ProfileHeader user={profileUser} postCount={posts.length} isLoading={isLoading} />
+        )}
+
         <div className="feed">
           {isLoading ? (
             <div className="emptyState">正在载入花园内容...</div>
+          ) : posts.length === 0 ? (
+            <div className="emptyState">{profileUsername ? "这个主页还没有发布内容" : "还没有发布内容"}</div>
           ) : (
-            posts.map((post) => <PostCard key={post.id} post={post} onReact={reactToPost} />)
+            posts.map((post) => (
+              <PostCard key={post.id} post={post} onReact={reactToPost} onAuthorClick={navigateToProfile} />
+            ))
           )}
         </div>
       </section>
@@ -296,19 +349,63 @@ function App() {
   );
 }
 
+function ProfileHeader({
+  user,
+  postCount,
+  isLoading,
+}: {
+  user: User | null;
+  postCount: number;
+  isLoading: boolean;
+}) {
+  if (isLoading) {
+    return <section className="profileHeader skeleton">正在载入主页...</section>;
+  }
+
+  if (!user) {
+    return <section className="profileHeader missing">没有找到这个用户</section>;
+  }
+
+  return (
+    <section className="profileHeader">
+      <img src={user.avatarUrl} alt="" />
+      <div className="profileMeta">
+        <div>
+          <h3>{user.name}</h3>
+          <span>@{user.username}</span>
+        </div>
+        <p>{user.bio || "这个用户还没有填写简介。"}</p>
+        <div className="profileFacts">
+          {user.location && (
+            <span>
+              <MapPin size={15} />
+              {user.location}
+            </span>
+          )}
+          <span>{postCount} posts</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function PostCard({
   post,
   onReact,
+  onAuthorClick,
 }: {
   post: Post;
   onReact: (postId: string, type: "upvote" | "downvote") => void;
+  onAuthorClick: (username: string) => void;
 }) {
   return (
     <article className="postCard">
       <div className="postAuthor">
         <img src={post.author.avatarUrl} alt="" />
         <div>
-          <strong>{post.author.name}</strong>
+          <button type="button" onClick={() => onAuthorClick(post.author.username)}>
+            {post.author.name}
+          </button>
           <span>
             @{post.author.username} · {formatDate(post.createdAt)}
           </span>
@@ -333,6 +430,11 @@ function PostCard({
       </div>
     </article>
   );
+}
+
+function getProfileUsername() {
+  const match = window.location.pathname.match(/^\/u\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function formatDate(value: string) {

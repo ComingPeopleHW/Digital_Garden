@@ -77,11 +77,13 @@ For IP-only access, Caddy serves plain HTTP. When a domain is available, update 
 ## Initial MVP
 
 - Public feed across users
-- User profile summaries
+- User profile summaries and public profile pages at `/u/{username}`
 - Text and image post cards
 - PostgreSQL-backed users, posts, media, and reactions
 - Upvote and downvote actions with one reaction per demo user
-- API skeleton ready for auth and uploads
+- Email/username registration, login, logout, and session cookies
+- Logged-in publishing for text and image URL posts
+- API skeleton ready for uploads
 
 ## Backend API
 
@@ -92,6 +94,8 @@ POST /api/auth/register
 POST /api/auth/login
 POST /api/auth/logout
 GET /api/users
+GET /api/users/{username}
+GET /api/users/{username}/posts
 GET /api/posts
 POST /api/posts
 POST /api/posts/{postID}/reactions
