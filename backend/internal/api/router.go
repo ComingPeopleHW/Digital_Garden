@@ -29,6 +29,8 @@ type ContentStore interface {
 	DeleteSession(ctx context.Context, token string) error
 	UpdateUserProfile(ctx context.Context, input garden.UpdateUserProfileInput) (garden.User, error)
 	CreatePost(ctx context.Context, input garden.CreatePostInput) (garden.Post, error)
+	UpdatePost(ctx context.Context, input garden.UpdatePostInput) (garden.Post, error)
+	DeletePost(ctx context.Context, postID string, authorID string) error
 	ReactToPost(ctx context.Context, postID string, userKey string, reaction garden.ReactionType) (garden.Post, error)
 }
 
@@ -57,6 +59,8 @@ func NewRouter(frontendOrigin string, store ContentStore) http.Handler {
 		r.Get("/users/{username}/posts", listUserPosts(store))
 		r.Get("/posts", listPosts(store))
 		r.Post("/posts", createPost(store))
+		r.Patch("/posts/{postID}", updatePost(store))
+		r.Delete("/posts/{postID}", deletePost(store))
 		r.Post("/posts/{postID}/reactions", reactToPost(store))
 	})
 
@@ -327,6 +331,81 @@ func createPost(store ContentStore) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusCreated, post)
+	}
+}
+
+func updatePost(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, err := requireUser(r.Context(), r, store)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "login required")
+			return
+		}
+
+		var payload struct {
+			Title    string `json:"title"`
+			Body     string `json:"body"`
+			ImageURL string `json:"imageUrl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		payload.Title = strings.TrimSpace(payload.Title)
+		payload.Body = strings.TrimSpace(payload.Body)
+		payload.ImageURL = strings.TrimSpace(payload.ImageURL)
+		if payload.Title == "" || payload.Body == "" {
+			writeError(w, http.StatusBadRequest, "title and body are required")
+			return
+		}
+
+		post, err := store.UpdatePost(r.Context(), garden.UpdatePostInput{
+			PostID:   chi.URLParam(r, "postID"),
+			AuthorID: user.ID,
+			Title:    payload.Title,
+			Body:     payload.Body,
+			ImageURL: payload.ImageURL,
+		})
+		if err != nil {
+			if errors.Is(err, postgres.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "post not found")
+				return
+			}
+			if errors.Is(err, postgres.ErrForbidden) {
+				writeError(w, http.StatusForbidden, "only the author can edit this post")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to update post")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, post)
+	}
+}
+
+func deletePost(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, err := requireUser(r.Context(), r, store)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "login required")
+			return
+		}
+
+		if err := store.DeletePost(r.Context(), chi.URLParam(r, "postID"), user.ID); err != nil {
+			if errors.Is(err, postgres.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "post not found")
+				return
+			}
+			if errors.Is(err, postgres.ErrForbidden) {
+				writeError(w, http.StatusForbidden, "only the author can delete this post")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to delete post")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

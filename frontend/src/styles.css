@@ -408,6 +408,24 @@ h3 {
   box-shadow: 0 18px 50px rgb(51 42 31 / 8%);
 }
 
+.postCard input,
+.postCard textarea {
+  border-color: #d8d0c2;
+  background: #fffdf8;
+  color: #18201c;
+}
+
+.postCard input::placeholder,
+.postCard textarea::placeholder {
+  color: #899186;
+}
+
+.postCard input:focus,
+.postCard textarea:focus {
+  border-color: #92a957;
+  box-shadow: 0 0 0 3px rgb(146 169 87 / 16%);
+}
+
 .postAuthor {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr) auto;
@@ -462,8 +480,33 @@ h3 {
   object-fit: cover;
 }
 
+.postEditForm {
+  display: grid;
+  gap: 12px;
+}
+
+.postEditActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.postEditActions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: #edf1e6;
+  color: #263129;
+  cursor: pointer;
+  font-weight: 720;
+}
+
 .reactionBar {
   display: flex;
+  align-items: center;
   gap: 10px;
   padding-top: 14px;
   border-top: 1px solid #ece4d8;
@@ -474,6 +517,16 @@ h3 {
   background: #edf1e6;
   color: #263129;
   font-weight: 720;
+}
+
+.ownerActions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.ownerActions button {
+  min-width: 44px;
 }
 
 .emptyState {

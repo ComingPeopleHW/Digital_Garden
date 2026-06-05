@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	ErrConflict = errors.New("conflict")
-	ErrNotFound = errors.New("not found")
+	ErrConflict  = errors.New("conflict")
+	ErrForbidden = errors.New("forbidden")
+	ErrNotFound  = errors.New("not found")
 
 	//go:embed migrations/*.sql
 	migrationFiles embed.FS
@@ -326,6 +327,91 @@ func (s *Store) CreatePost(ctx context.Context, input garden.CreatePostInput) (g
 	}
 
 	return post, nil
+}
+
+func (s *Store) UpdatePost(ctx context.Context, input garden.UpdatePostInput) (garden.Post, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return garden.Post{}, fmt.Errorf("begin update post transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var authorID string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT author_id
+		FROM posts
+		WHERE id = $1
+	`, input.PostID).Scan(&authorID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return garden.Post{}, ErrNotFound
+		}
+		return garden.Post{}, fmt.Errorf("find post author: %w", err)
+	}
+	if authorID != input.AuthorID {
+		return garden.Post{}, ErrForbidden
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE posts
+		SET title = $2,
+			body = $3
+		WHERE id = $1
+	`, input.PostID, input.Title, input.Body); err != nil {
+		return garden.Post{}, fmt.Errorf("update post: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM post_media WHERE post_id = $1`, input.PostID); err != nil {
+		return garden.Post{}, fmt.Errorf("delete post media: %w", err)
+	}
+	if input.ImageURL != "" {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO post_media (post_id, url, sort_order)
+			VALUES ($1, $2, 0)
+		`, input.PostID, input.ImageURL); err != nil {
+			return garden.Post{}, fmt.Errorf("insert post media: %w", err)
+		}
+	}
+
+	post, err := getPostTx(ctx, tx, input.PostID)
+	if err != nil {
+		return garden.Post{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return garden.Post{}, fmt.Errorf("commit update post transaction: %w", err)
+	}
+
+	return post, nil
+}
+
+func (s *Store) DeletePost(ctx context.Context, postID string, authorID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM posts
+		WHERE id = $1
+			AND author_id = $2
+	`, postID, authorID)
+	if err != nil {
+		return fmt.Errorf("delete post: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read delete post result: %w", err)
+	}
+	if rowsAffected == 1 {
+		return nil
+	}
+
+	var exists bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM posts WHERE id = $1)`, postID).Scan(&exists); err != nil {
+		return fmt.Errorf("check post existence: %w", err)
+	}
+	if exists {
+		return ErrForbidden
+	}
+	return ErrNotFound
 }
 
 func (s *Store) ReactToPost(ctx context.Context, postID string, userKey string, reaction garden.ReactionType) (garden.Post, error) {

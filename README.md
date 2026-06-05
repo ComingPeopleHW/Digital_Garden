@@ -84,6 +84,7 @@ For IP-only access, Caddy serves plain HTTP. When a domain is available, update 
 - Email/username registration, login, logout, and session cookies
 - Logged-in profile editing for display name, bio, avatar URL, and location
 - Logged-in publishing for text and image URL posts
+- Author-only editing and deletion for posts
 - API skeleton ready for uploads
 
 ## Backend API
@@ -100,6 +101,8 @@ GET /api/users/{username}
 GET /api/users/{username}/posts
 GET /api/posts
 POST /api/posts
+PATCH /api/posts/{postID}
+DELETE /api/posts/{postID}
 POST /api/posts/{postID}/reactions
 ```
 

@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  Edit3,
   Home,
   Leaf,
   LogOut,
@@ -11,6 +13,8 @@ import {
   Save,
   Send,
   Settings,
+  Trash2,
+  X,
   Users,
 } from "lucide-react";
 import "./styles.css";
@@ -222,6 +226,35 @@ function App() {
     setPosts((current) =>
       current.map((post) => (post.author.id === user.id ? { ...post, author: user } : post)),
     );
+  }
+
+  async function updatePost(postId: string, input: { title: string; body: string; imageUrl: string }) {
+    setNotice("");
+    const response = await apiFetch(`/api/posts/${postId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) {
+      setNotice("文章保存失败");
+      return false;
+    }
+
+    const updatedPost = (await response.json()) as Post;
+    setPosts((current) => current.map((post) => (post.id === updatedPost.id ? updatedPost : post)));
+    return true;
+  }
+
+  async function deletePost(postId: string) {
+    setNotice("");
+    const response = await apiFetch(`/api/posts/${postId}`, { method: "DELETE" });
+    if (!response.ok) {
+      setNotice("文章删除失败");
+      return false;
+    }
+
+    setPosts((current) => current.filter((post) => post.id !== postId));
+    return true;
   }
 
   function navigateToProfile(username: string) {
@@ -446,7 +479,15 @@ function App() {
             <div className="emptyState">{profileUsername ? "这个主页还没有发布内容" : "还没有发布内容"}</div>
           ) : (
             posts.map((post) => (
-              <PostCard key={post.id} post={post} onReact={reactToPost} onAuthorClick={navigateToProfile} />
+              <PostCard
+                key={post.id}
+                post={post}
+                me={me}
+                onReact={reactToPost}
+                onAuthorClick={navigateToProfile}
+                onUpdate={updatePost}
+                onDelete={deletePost}
+              />
             ))
           )}
         </div>
@@ -497,13 +538,52 @@ function ProfileHeader({
 
 function PostCard({
   post,
+  me,
   onReact,
   onAuthorClick,
+  onUpdate,
+  onDelete,
 }: {
   post: Post;
+  me: User | null;
   onReact: (postId: string, type: "upvote" | "downvote") => void;
   onAuthorClick: (username: string) => void;
+  onUpdate: (postId: string, input: { title: string; body: string; imageUrl: string }) => Promise<boolean>;
+  onDelete: (postId: string) => Promise<boolean>;
 }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    title: post.title,
+    body: post.body,
+    imageUrl: post.imageUrl ?? "",
+  });
+  const isAuthor = me?.id === post.author.id;
+
+  useEffect(() => {
+    if (!isEditing) {
+      setEditForm({
+        title: post.title,
+        body: post.body,
+        imageUrl: post.imageUrl ?? "",
+      });
+    }
+  }, [isEditing, post]);
+
+  async function submitEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const ok = await onUpdate(post.id, editForm);
+    if (ok) {
+      setIsEditing(false);
+    }
+  }
+
+  async function handleDelete() {
+    const ok = await onDelete(post.id);
+    if (ok) {
+      setIsEditing(false);
+    }
+  }
+
   return (
     <article className="postCard">
       <div className="postAuthor">
@@ -521,9 +601,45 @@ function PostCard({
           {post.author.location}
         </span>
       </div>
-      <h3>{post.title}</h3>
-      <p>{post.body}</p>
-      {post.imageUrl && <img className="postImage" src={post.imageUrl} alt="" />}
+
+      {isEditing ? (
+        <form className="postEditForm" onSubmit={submitEdit}>
+          <input
+            value={editForm.title}
+            onChange={(event) => setEditForm((current) => ({ ...current, title: event.target.value }))}
+            placeholder="标题"
+            required
+          />
+          <textarea
+            value={editForm.body}
+            onChange={(event) => setEditForm((current) => ({ ...current, body: event.target.value }))}
+            placeholder="正文"
+            required
+          />
+          <input
+            value={editForm.imageUrl}
+            onChange={(event) => setEditForm((current) => ({ ...current, imageUrl: event.target.value }))}
+            placeholder="图片 URL"
+          />
+          <div className="postEditActions">
+            <button type="submit">
+              <Check size={17} />
+              保存
+            </button>
+            <button type="button" onClick={() => setIsEditing(false)}>
+              <X size={17} />
+              取消
+            </button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <h3>{post.title}</h3>
+          <p>{post.body}</p>
+          {post.imageUrl && <img className="postImage" src={post.imageUrl} alt="" />}
+        </>
+      )}
+
       <div className="reactionBar">
         <button type="button" onClick={() => onReact(post.id, "upvote")}>
           <ArrowUp size={18} />
@@ -533,6 +649,16 @@ function PostCard({
           <ArrowDown size={18} />
           {post.downvotes}
         </button>
+        {isAuthor && !isEditing && (
+          <div className="ownerActions">
+            <button type="button" onClick={() => setIsEditing(true)} aria-label="编辑文章">
+              <Edit3 size={17} />
+            </button>
+            <button type="button" onClick={handleDelete} aria-label="删除文章">
+              <Trash2 size={17} />
+            </button>
+          </div>
+        )}
       </div>
     </article>
   );

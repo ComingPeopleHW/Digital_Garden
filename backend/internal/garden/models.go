@@ -46,6 +46,14 @@ type CreatePostInput struct {
 	ImageURL string
 }
 
+type UpdatePostInput struct {
+	PostID   string
+	AuthorID string
+	Title    string
+	Body     string
+	ImageURL string
+}
+
 type ReactionType string
 
 const (
