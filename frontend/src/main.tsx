@@ -109,7 +109,7 @@ function App() {
     });
   }, [me]);
 
-  const featuredUser = users[0];
+  const featuredUser = profileUser ?? me ?? users[0];
   const totals = useMemo(() => {
     return posts.reduce(
       (acc, post) => {
@@ -401,7 +401,7 @@ function App() {
             </div>
             <p>{featuredUser.bio}</p>
             <button type="button" onClick={() => navigateToProfile(featuredUser.username)}>
-              查看主页
+              {profileUser?.id === featuredUser.id ? "当前主页" : "查看主页"}
             </button>
           </section>
         )}
