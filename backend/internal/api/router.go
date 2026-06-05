@@ -1,44 +1,37 @@
 package api
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"sync"
+	"strings"
 	"time"
 
+	"github.com/ComingPeopleHW/Digital_Garden/backend/internal/garden"
+	"github.com/ComingPeopleHW/Digital_Garden/backend/internal/store/postgres"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/crypto/bcrypt"
 )
 
-type User struct {
-	ID        string `json:"id"`
-	Username  string `json:"username"`
-	Name      string `json:"name"`
-	Bio       string `json:"bio"`
-	AvatarURL string `json:"avatarUrl"`
-	Location  string `json:"location"`
+type ContentStore interface {
+	ListUsers(ctx context.Context) ([]garden.User, error)
+	ListPosts(ctx context.Context) ([]garden.Post, error)
+	CreateUser(ctx context.Context, input garden.CreateUserInput) (garden.User, error)
+	FindUserForLogin(ctx context.Context, login string) (garden.User, string, error)
+	CreateSession(ctx context.Context, token string, userID string) error
+	UserBySessionToken(ctx context.Context, token string) (garden.User, error)
+	DeleteSession(ctx context.Context, token string) error
+	CreatePost(ctx context.Context, input garden.CreatePostInput) (garden.Post, error)
+	ReactToPost(ctx context.Context, postID string, userKey string, reaction garden.ReactionType) (garden.Post, error)
 }
 
-type Post struct {
-	ID        string    `json:"id"`
-	Author    User      `json:"author"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	ImageURL  string    `json:"imageUrl,omitempty"`
-	Upvotes   int       `json:"upvotes"`
-	Downvotes int       `json:"downvotes"`
-	CreatedAt time.Time `json:"createdAt"`
-}
+const sessionCookieName = "dg_session"
 
-type Store struct {
-	mu    sync.RWMutex
-	users []User
-	posts []Post
-}
-
-func NewRouter(frontendOrigin string) http.Handler {
-	store := newSeedStore()
-
+func NewRouter(frontendOrigin string, store ContentStore) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -51,64 +44,274 @@ func NewRouter(frontendOrigin string) http.Handler {
 	})
 
 	r.Route("/api", func(r chi.Router) {
-		r.Get("/users", store.listUsers)
-		r.Get("/posts", store.listPosts)
-		r.Post("/posts/{postID}/reactions", store.reactToPost)
+		r.Get("/me", me(store))
+		r.Post("/auth/register", register(store))
+		r.Post("/auth/login", login(store))
+		r.Post("/auth/logout", logout(store))
+		r.Get("/users", listUsers(store))
+		r.Get("/posts", listPosts(store))
+		r.Post("/posts", createPost(store))
+		r.Post("/posts/{postID}/reactions", reactToPost(store))
 	})
 
 	return r
 }
 
-func (s *Store) listUsers(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	writeJSON(w, http.StatusOK, s.users)
+func me(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(r.Context())
+		if ok {
+			writeJSON(w, http.StatusOK, map[string]any{"user": user})
+			return
+		}
+
+		token, ok := sessionToken(r)
+		if !ok {
+			writeJSON(w, http.StatusOK, map[string]any{"user": nil})
+			return
+		}
+
+		user, err := store.UserBySessionToken(r.Context(), token)
+		if err != nil {
+			if errors.Is(err, postgres.ErrNotFound) {
+				clearSessionCookie(w)
+				writeJSON(w, http.StatusOK, map[string]any{"user": nil})
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to load session")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"user": user})
+	}
 }
 
-func (s *Store) listPosts(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	writeJSON(w, http.StatusOK, s.posts)
+func register(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Username string `json:"username"`
+			Email    string `json:"email"`
+			Name     string `json:"name"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		payload.Username = strings.TrimSpace(payload.Username)
+		payload.Email = strings.TrimSpace(payload.Email)
+		payload.Name = strings.TrimSpace(payload.Name)
+		if payload.Name == "" {
+			payload.Name = payload.Username
+		}
+		if payload.Username == "" || payload.Email == "" || len(payload.Password) < 8 {
+			writeError(w, http.StatusBadRequest, "username, email, and 8+ character password are required")
+			return
+		}
+
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(payload.Password), bcrypt.DefaultCost)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to secure password")
+			return
+		}
+
+		user, err := store.CreateUser(r.Context(), garden.CreateUserInput{
+			ID:           "user_" + randomHex(12),
+			Username:     payload.Username,
+			Email:        payload.Email,
+			Name:         payload.Name,
+			PasswordHash: string(passwordHash),
+		})
+		if err != nil {
+			if errors.Is(err, postgres.ErrConflict) {
+				writeError(w, http.StatusConflict, "username or email already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to create user")
+			return
+		}
+
+		token := randomHex(32)
+		if err := store.CreateSession(r.Context(), token, user.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create session")
+			return
+		}
+		setSessionCookie(w, token)
+		writeJSON(w, http.StatusCreated, map[string]garden.User{"user": user})
+	}
 }
 
-func (s *Store) reactToPost(w http.ResponseWriter, r *http.Request) {
-	var payload struct {
-		Type string `json:"type"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if payload.Type != "upvote" && payload.Type != "downvote" {
-		writeError(w, http.StatusBadRequest, "reaction type must be upvote or downvote")
-		return
-	}
-
-	postID := chi.URLParam(r, "postID")
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.posts {
-		if s.posts[i].ID != postID {
-			continue
+func login(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Login    string `json:"login"`
+			Password string `json:"password"`
 		}
-		if payload.Type == "upvote" {
-			s.posts[i].Upvotes++
-		} else {
-			s.posts[i].Downvotes++
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
 		}
-		writeJSON(w, http.StatusOK, s.posts[i])
-		return
-	}
 
-	writeError(w, http.StatusNotFound, "post not found")
+		user, passwordHash, err := store.FindUserForLogin(r.Context(), strings.TrimSpace(payload.Login))
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "invalid login or password")
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(payload.Password)); err != nil {
+			writeError(w, http.StatusUnauthorized, "invalid login or password")
+			return
+		}
+
+		token := randomHex(32)
+		if err := store.CreateSession(r.Context(), token, user.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create session")
+			return
+		}
+		setSessionCookie(w, token)
+		writeJSON(w, http.StatusOK, map[string]garden.User{"user": user})
+	}
+}
+
+func logout(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if token, ok := sessionToken(r); ok {
+			if err := store.DeleteSession(r.Context(), token); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to log out")
+				return
+			}
+		}
+		clearSessionCookie(w)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func listUsers(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		users, err := store.ListUsers(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list users")
+			return
+		}
+		writeJSON(w, http.StatusOK, users)
+	}
+}
+
+func listPosts(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		posts, err := store.ListPosts(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list posts")
+			return
+		}
+		writeJSON(w, http.StatusOK, posts)
+	}
+}
+
+func createPost(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, err := requireUser(r.Context(), r, store)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "login required")
+			return
+		}
+
+		var payload struct {
+			Title    string `json:"title"`
+			Body     string `json:"body"`
+			ImageURL string `json:"imageUrl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		payload.Title = strings.TrimSpace(payload.Title)
+		payload.Body = strings.TrimSpace(payload.Body)
+		payload.ImageURL = strings.TrimSpace(payload.ImageURL)
+		if payload.Title == "" || payload.Body == "" {
+			writeError(w, http.StatusBadRequest, "title and body are required")
+			return
+		}
+
+		post, err := store.CreatePost(r.Context(), garden.CreatePostInput{
+			ID:       "post_" + randomHex(12),
+			AuthorID: user.ID,
+			Title:    payload.Title,
+			Body:     payload.Body,
+			ImageURL: payload.ImageURL,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create post")
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, post)
+	}
+}
+
+func reactToPost(store ContentStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Type string `json:"type"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		reaction := garden.ReactionType(payload.Type)
+		if !reaction.Valid() {
+			writeError(w, http.StatusBadRequest, "reaction type must be upvote or downvote")
+			return
+		}
+
+		postID := chi.URLParam(r, "postID")
+		userKey := reactionUserKey(r)
+		post, err := store.ReactToPost(r.Context(), postID, userKey, reaction)
+		if err != nil {
+			if errors.Is(err, postgres.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "post not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to react to post")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, post)
+	}
+}
+
+func reactionUserKey(r *http.Request) string {
+	if token, ok := sessionToken(r); ok {
+		return "session:" + token
+	}
+	userKey := strings.TrimSpace(r.Header.Get("X-Demo-User-Key"))
+	if userKey == "" {
+		return "demo-viewer"
+	}
+	return userKey
 }
 
 func cors(frontendOrigin string) func(http.Handler) http.Handler {
+	allowedOrigins := map[string]struct{}{
+		frontendOrigin:          {},
+		"http://localhost:5173": {},
+		"http://127.0.0.1:5173": {},
+		"http://localhost:4173": {},
+		"http://127.0.0.1:4173": {},
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", frontendOrigin)
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			if origin := r.Header.Get("Origin"); origin != "" {
+				if _, ok := allowedOrigins[origin]; ok {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+					w.Header().Set("Vary", "Origin")
+				}
+			}
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Demo-User-Key")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -119,6 +322,64 @@ func cors(frontendOrigin string) func(http.Handler) http.Handler {
 	}
 }
 
+type contextKey string
+
+const userContextKey contextKey = "user"
+
+func currentUser(ctx context.Context) (garden.User, bool) {
+	user, ok := ctx.Value(userContextKey).(garden.User)
+	return user, ok
+}
+
+func requireUser(ctx context.Context, r *http.Request, store ContentStore) (garden.User, error) {
+	if user, ok := currentUser(ctx); ok {
+		return user, nil
+	}
+	token, ok := sessionToken(r)
+	if !ok {
+		return garden.User{}, postgres.ErrNotFound
+	}
+	return store.UserBySessionToken(ctx, token)
+}
+
+func sessionToken(r *http.Request) (string, bool) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+		return "", false
+	}
+	return cookie.Value, true
+}
+
+func setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int((14 * 24 * time.Hour).Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func randomHex(bytesLen int) string {
+	bytes := make([]byte, bytesLen)
+	if _, err := rand.Read(bytes); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(bytes)
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -127,68 +388,4 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
-}
-
-func newSeedStore() *Store {
-	users := []User{
-		{
-			ID:        "user_aurora",
-			Username:  "aurora",
-			Name:      "林夏",
-			Bio:       "记录产品灵感、城市散步和一些正在变好的小习惯。",
-			AvatarURL: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&q=80",
-			Location:  "Shanghai",
-		},
-		{
-			ID:        "user_river",
-			Username:  "river",
-			Name:      "周屿",
-			Bio:       "Golang engineer. Building calm software and useful personal tools.",
-			AvatarURL: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=256&q=80",
-			Location:  "Hangzhou",
-		},
-		{
-			ID:        "user_mira",
-			Username:  "mira",
-			Name:      "Mira Chen",
-			Bio:       "Photography, essays, notebooks, and tiny public experiments.",
-			AvatarURL: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80",
-			Location:  "Singapore",
-		},
-	}
-
-	return &Store{
-		users: users,
-		posts: []Post{
-			{
-				ID:        "post_001",
-				Author:    users[0],
-				Title:     "把主页做成一座花园",
-				Body:      "我希望这里不是简历，也不是传统博客，而是一个可以慢慢生长的空间。文字、图片、链接和生活痕迹都能自然地放进来。",
-				ImageURL:  "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1200&q=80",
-				Upvotes:   42,
-				Downvotes: 2,
-				CreatedAt: time.Now().Add(-3 * time.Hour),
-			},
-			{
-				ID:        "post_002",
-				Author:    users[1],
-				Title:     "后端边界先保持朴素",
-				Body:      "用户、内容、媒体、互动先拆成清晰的模块。第一阶段不急着复杂化，把 API 合同和数据流跑顺更重要。",
-				Upvotes:   31,
-				Downvotes: 1,
-				CreatedAt: time.Now().Add(-8 * time.Hour),
-			},
-			{
-				ID:        "post_003",
-				Author:    users[2],
-				Title:     "今天的照片墙",
-				Body:      "光线好的时候，连临时拍下来的角落都像是在提醒我：页面也应该留一点呼吸感。",
-				ImageURL:  "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80",
-				Upvotes:   58,
-				Downvotes: 4,
-				CreatedAt: time.Now().Add(-24 * time.Hour),
-			},
-		},
-	}
 }

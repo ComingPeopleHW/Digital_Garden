@@ -23,6 +23,39 @@ button {
   font: inherit;
 }
 
+input,
+textarea {
+  width: 100%;
+  border: 1px solid rgb(248 244 237 / 18%);
+  border-radius: 8px;
+  background: rgb(248 244 237 / 10%);
+  color: #f8f4ed;
+  font: inherit;
+  outline: none;
+}
+
+input {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+textarea {
+  min-height: 116px;
+  padding: 12px;
+  resize: vertical;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgb(248 244 237 / 50%);
+}
+
+input:focus,
+textarea:focus {
+  border-color: #d8f26f;
+  box-shadow: 0 0 0 3px rgb(216 242 111 / 14%);
+}
+
 .shell {
   display: grid;
   grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
@@ -101,12 +134,14 @@ h3 {
   font-size: 1.35rem;
 }
 
-.quickActions {
+.authPanel,
+.composeForm {
   display: grid;
   gap: 12px;
 }
 
-.quickActions button,
+.authPanel button,
+.composeForm button,
 .reactionBar button {
   display: inline-flex;
   align-items: center;
@@ -120,15 +155,56 @@ h3 {
     background 160ms ease;
 }
 
-.quickActions button {
+.authPanel button,
+.composeForm button {
   background: #f8f4ed;
   color: #1d2a22;
   font-weight: 720;
 }
 
-.quickActions button:hover,
+.authPanel button:hover,
+.composeForm button:hover,
 .reactionBar button:hover {
   transform: translateY(-1px);
+}
+
+.authTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.authTabs button {
+  min-height: 38px;
+  background: rgb(248 244 237 / 10%);
+  color: rgb(248 244 237 / 72%);
+}
+
+.authTabs button.active {
+  background: #d8f26f;
+  color: #18201c;
+}
+
+.accountLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgb(248 244 237 / 76%);
+  font-weight: 720;
+}
+
+.accountLine button {
+  width: 40px;
+  min-height: 40px;
+  background: rgb(248 244 237 / 12%);
+  color: #f8f4ed;
+}
+
+.notice {
+  margin: 0;
+  color: #ffd6bd;
+  font-size: 0.92rem;
 }
 
 .profilePreview {
@@ -308,4 +384,3 @@ h3 {
     grid-column: 2;
   }
 }
-
